@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bounding Box Labeller</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d1a;
+      color: #e0e0f0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      background: #12122a;
+      border-right: 1px solid #1e1e40;
+      display: flex;
+      flex-direction: column;
+      padding: 16px 12px;
+      gap: 16px;
+    }
+
+    #sidebar h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #7070aa; }
+
+    .category-list { display: flex; flex-direction: column; gap: 6px; }
+    .cat-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px; border-radius: 6px;
+      background: #1a1a35; font-size: 13px;
+    }
+    .cat-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+    .cat-key {
+      margin-left: auto; font-size: 11px; color: #606090;
+      background: #0d0d20; padding: 1px 5px; border-radius: 3px;
+      font-family: monospace;
+    }
+
+    .controls { display: flex; flex-direction: column; gap: 8px; }
+    button {
+      background: #1e1e40; border: 1px solid #2e2e60;
+      color: #c0c0e0; font-size: 12px; padding: 7px 10px;
+      border-radius: 6px; cursor: pointer; text-align: left;
+    }
+    button:hover { background: #28285a; }
+    button kbd {
+      float: right; font-size: 10px; color: #606090;
+      background: #0d0d20; padding: 1px 4px; border-radius: 3px;
+    }
+
+    #box-list-section { flex: 1; overflow-y: auto; }
+    #box-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+    .box-entry {
+      font-size: 11px; padding: 4px 8px; border-radius: 5px;
+      background: #1a1a35; display: flex; align-items: center; gap: 6px;
+    }
+    .box-entry .swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+    /* ── Main ── */
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #toolbar {
+      background: #12122a;
+      border-bottom: 1px solid #1e1e40;
+      padding: 8px 16px;
+      font-size: 12px;
+      color: #6060a0;
+      display: flex; gap: 16px; align-items: center;
+    }
+    #toolbar span { color: #9090c0; }
+
+    #canvas-wrap {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 16px;
+    }
+
+    canvas {
+      border-radius: 8px;
+      cursor: crosshair;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    #status {
+      background: #12122a;
+      border-top: 1px solid #1e1e40;
+      padding: 6px 16px;
+      font-size: 11px;
+      color: #5050a0;
+    }
+  </style>
+</head>
+<body>
+
+<aside id="sidebar">
+  <div>
+    <h2>Categories</h2>
+    <div class="category-list" id="cat-list"></div>
+  </div>
+
+  <div class="controls">
+    <h2>Actions</h2>
+    <button onclick="labeller.undo()">Undo <kbd>Ctrl+Z</kbd></button>
+    <button onclick="labeller.redo()">Redo <kbd>Ctrl+Y</kbd></button>
+    <button onclick="labeller.deleteSelected()">Delete box <kbd>Del</kbd></button>
+  </div>
+
+  <div id="box-list-section">
+    <h2>Boxes</h2>
+    <div id="box-list"></div>
+  </div>
+</aside>
+
+<div id="main">
+  <div id="toolbar">
+    <span>Draw</span> drag to create a new box &nbsp;|&nbsp;
+    <span>Select</span> single-click an existing box &nbsp;|&nbsp;
+    <span>Reassign</span> double-click a box, then press a number key
+  </div>
+  <div id="canvas-wrap">
+    <canvas id="canvas" width="900" height="600"></canvas>
+  </div>
+  <div id="status" id="status">Ready</div>
+</div>
+
+<script src="labeller.js"></script>
+<script>
+  const COLOURS = [
+    '#e6194b','#3cb44b','#4363d8','#f58231','#911eb4',
+    '#42d4f4','#f032e6','#bfef45','#fabed4','#469990',
+  ];
+
+  const CATEGORIES = ['Person', 'Vehicle', 'Animal', 'Sign', 'Object'];
+
+  // Pre-seed a couple of labelled boxes to demonstrate reassignment
+  const INITIAL_BOXES = [
+    { id: 0, x: 80,  y: 120, w: 200, h: 150, categoryIndex: 0 },
+    { id: 1, x: 400, y: 200, w: 160, h: 120, categoryIndex: 2 },
+    { id: 2, x: 650, y: 80,  w: 130, h: 200, categoryIndex: 1 },
+  ];
+
+  const labeller = new BoundingBoxLabeller('#canvas', {
+    categories: CATEGORIES,
+    initialBoxes: INITIAL_BOXES,
+  });
+
+  // ── Sidebar: category list ──
+  const catListEl = document.getElementById('cat-list');
+  CATEGORIES.forEach((name, i) => {
+    const div = document.createElement('div');
+    div.className = 'cat-item';
+    div.innerHTML = `
+      <span class="cat-swatch" style="background:${COLOURS[i]}"></span>
+      ${name}
+      <span class="cat-key">${i + 1}</span>`;
+    catListEl.appendChild(div);
+  });
+
+  // ── Sidebar: box list ──
+  function refreshBoxList(boxes) {
+    const el = document.getElementById('box-list');
+    el.innerHTML = '';
+    if (!boxes.length) {
+      el.innerHTML = '<div style="color:#404070;font-size:11px;padding:4px 0">No boxes yet</div>';
+      return;
+    }
+    boxes.forEach(b => {
+      const cat = CATEGORIES[b.categoryIndex] ?? `cat${b.categoryIndex + 1}`;
+      const col = COLOURS[b.categoryIndex % COLOURS.length];
+      const div = document.createElement('div');
+      div.className = 'box-entry';
+      div.innerHTML = `<span class="swatch" style="background:${col}"></span>#${b.id} — ${cat}`;
+      el.appendChild(div);
+    });
+  }
+
+  labeller.on('change', ({ boxes }) => {
+    refreshBoxList(boxes);
+    document.getElementById('status').textContent =
+      `${boxes.length} box${boxes.length !== 1 ? 'es' : ''} · last change ${new Date().toLocaleTimeString()}`;
+  });
+
+  // Initialise box list with seed data
+  refreshBoxList(INITIAL_BOXES);
+
+  // Draw a placeholder image (grid pattern) so the canvas isn't just black
+  (function drawPlaceholderImage() {
+    const c = document.getElementById('canvas');
+    const ctx = c.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, c.width, c.height);
+    grad.addColorStop(0, '#1a1a3e');
+    grad.addColorStop(1, '#0d1a35');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < c.width; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.height); ctx.stroke(); }
+    for (let y = 0; y < c.height; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(c.width, y); ctx.stroke(); }
+    // Force labeller to re-render on top
+    labeller._render();
+  })();
+</script>
+</body>
+</html>
